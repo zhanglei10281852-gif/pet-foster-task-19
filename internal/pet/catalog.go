@@ -47,11 +47,13 @@ func (s *Service) UpdateRoom(ctx context.Context, principal Principal, input Roo
 	if input.Capacity < 1 || input.PricePerDay < 0 || !validRoomStatus(input.Status) {
 		return Room{}, fmt.Errorf("%w: invalid room capacity, price or status", ErrValidation)
 	}
-	active := 0
-	if input.Capacity < 1 {
-		input.Capacity = 1
+	var active int
+	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM foster_orders WHERE room_id=? AND status IN ('PENDING','CONFIRMED','IN_PROGRESS')`, input.ID).Scan(&active); err != nil {
+		return Room{}, err
 	}
-	_ = active
+	if input.Capacity < active {
+		return Room{}, fmt.Errorf("%w: room capacity cannot be reduced below active foster orders", ErrConflict)
+	}
 	result, err := s.store.db.ExecContext(ctx, `UPDATE rooms SET room_number=?,room_type=?,status=?,price_per_day=?,description=?,capacity=?,update_time=? WHERE room_id=?`, strings.TrimSpace(input.Number), strings.TrimSpace(input.Type), input.Status, input.PricePerDay, input.Description, input.Capacity, formatStoredTime(s.now()), input.ID)
 	if err != nil {
 		return Room{}, translateServiceError(err)
